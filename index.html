@@ -2250,7 +2250,7 @@ const RAW_PLAYERS_NHL = [
   {name:"Alex Laferriere", team:"LAK", isGoalie:false, pos:"RW", goals:0.26, assists:0.28, shots:2.55, blocks:0.6, shPoints:0.0},
   {name:"Quinton Byfield", team:"LAK", isGoalie:false, pos:"C", goals:0.3, assists:0.32, shots:2.28, blocks:0.56, shPoints:0.013},
   {name:"Trevor Moore", team:"LAK", isGoalie:false, pos:"LW", goals:0.19, assists:0.28, shots:2.3, blocks:0.52, shPoints:0.014},
-  {name:"Anze Kopitar", team:"LAK", isGoalie:false, pos:"C", goals:0.18, assists:0.39, shots:1.51, blocks:0.91, shPoints:0.0},
+  {name:"Kevin Fiala", team:"LAK", isGoalie:false, pos:"LW", goals:0.321, assists:0.393, shots:2.625, blocks:0.429, shPoints:0.0},
   {name:"Brandt Clarke", team:"LAK", isGoalie:false, pos:"D", goals:0.1, assists:0.39, shots:1.94, blocks:2.26, shPoints:0.0},
   {name:"Joel Edmundson", team:"LAK", isGoalie:false, pos:"D", goals:0.02, assists:0.26, shots:1.27, blocks:1.35, shPoints:0.012},
   {name:"Brian Dumoulin", team:"LAK", isGoalie:false, pos:"D", goals:0.02, assists:0.18, shots:0.74, blocks:1.09, shPoints:0.012},
@@ -4549,11 +4549,16 @@ function renderSetupPanel(){
   const dailyReady = true;
 
   // Runs once: now that Daily Challenge is always playable, "More ways to
-  // play" correctly defaults closed, leading with Today's Vault. Still
-  // respects whatever the user does with it afterward (see toggle
-  // listener below) rather than fighting a deliberate manual open/close.
+  // play" correctly defaults closed, leading with Today's Vault. But if
+  // the player already completed today's challenge, the primary card is a
+  // dead end ("Come back tomorrow") with nothing else to click — auto-
+  // expanding here is the difference between them noticing Free Play
+  // (and NHL) exist versus assuming there's nothing left to do until
+  // tomorrow. Still respects whatever the user does with it afterward
+  // (see toggle listener below) rather than fighting a deliberate manual
+  // open/close on every subsequent render.
   if(setupDetailsOpen === null){
-    setupDetailsOpen = !dailyReady;
+    setupDetailsOpen = !dailyReady || playedToday;
   }
 
 
