@@ -903,6 +903,16 @@
     padding-top:8px;
   }
   .run-analysis-efficiency strong{ color:var(--brass-bright); }
+  .run-analysis-hint{
+    font-size:11px;
+    color:var(--cream-dim);
+    opacity:0.75;
+    font-weight:400;
+  }
+  .run-analysis-divider{
+    border-top:1px dashed var(--line);
+    margin:10px 0;
+  }
   .run-analysis-note{
     font-size:12.5px;
     color:var(--cream-dim);
@@ -2672,7 +2682,14 @@ function advanceSeasonRound(playerName, playerFP, playerPos){
   // higher — real, honest, decision-based "value left on the table."
   const offersThisRound = state.declinedOffers.map(d => d.offer);
   const maxPossibleFP = Math.max(playerFP, ...offersThisRound);
-  season.roster.push({ player: playerName, fp: playerFP, round: season.roundNumber, pos: playerPos || null, maxPossibleFP });
+  // Board Ceiling: the OTHER framing, deliberately including luck rather
+  // than isolating it out — the single best card that actually existed on
+  // this round's board, whether or not the player ever had real access to
+  // it (they only ever controlled ONE case; this ignores that constraint
+  // on purpose). state.cases still holds the just-completed round's board
+  // here, before startGame() replaces it for the next round below.
+  const boardCeilingFP = Math.max(...state.cases.map(c => c.value));
+  season.roster.push({ player: playerName, fp: playerFP, round: season.roundNumber, pos: playerPos || null, maxPossibleFP, boardCeilingFP });
   document.getElementById('finaleOverlay').classList.add('hidden');
   if(season.roster.length >= getSeasonRounds(state.currentSport)){
     // FIX: this is now the ONLY place a completed lineup gets saved and the
@@ -2777,6 +2794,14 @@ function renderSeasonSummary(incomplete){
   const totalMaxPossibleFP = Math.round(season.roster.reduce((s,r) => s + Math.round((r.maxPossibleFP ?? r.fp) * 10) / 10, 0) * 10) / 10;
   const efficiencyPct = totalMaxPossibleFP > 0 ? Math.round((totalFP / totalMaxPossibleFP) * 100) : 100;
   const gapFP = Math.round((totalMaxPossibleFP - totalFP) * 10) / 10;
+  // Board Ceiling: the OTHER framing — sum of the single best card on every
+  // round's board, luck included on purpose (see advanceSeasonRound). This
+  // will almost always show a bigger gap than Decision Efficiency, since
+  // it's not pretending the player ever had a real shot at every card —
+  // it's answering "how much upside was sitting on the table," not "did
+  // you play your actual hand well."
+  const totalBoardCeilingFP = Math.round(season.roster.reduce((s,r) => s + Math.round((r.boardCeilingFP ?? r.fp) * 10) / 10, 0) * 10) / 10;
+  const capturedPct = totalBoardCeilingFP > 0 ? Math.round((totalFP / totalBoardCeilingFP) * 100) : 100;
 
   const rows = season.roster.map((r, i) => {
     const p = getPoolForSport(state.currentSport).find(x => x.player === r.player);
@@ -2803,16 +2828,25 @@ function renderSeasonSummary(incomplete){
         <strong>${fmt(totalFP)}</strong>
       </div>
       <div class="run-analysis-row">
-        <span>Maximum Possible</span>
+        <span>Board Ceiling <span class="run-analysis-hint">(best card, any round)</span></span>
+        <strong>${fmt(totalBoardCeilingFP)}</strong>
+      </div>
+      <div class="run-analysis-row run-analysis-efficiency">
+        <span>Captured</span>
+        <strong>${capturedPct}%</strong>
+      </div>
+      <div class="run-analysis-divider"></div>
+      <div class="run-analysis-row">
+        <span>Maximum Possible <span class="run-analysis-hint">(best offer you saw)</span></span>
         <strong>${fmt(totalMaxPossibleFP)}</strong>
       </div>
       <div class="run-analysis-row run-analysis-efficiency">
         <span>Decision Efficiency</span>
         <strong>${efficiencyPct}%</strong>
       </div>
-      <p class="run-analysis-note">${gapFP > 0.05
-        ? `You left ${fmt(gapFP)} on the table this run — every offer you saw and declined, plus what you actually walked away with, factor in. This isn't about which case had the biggest number; it's about the best deal that was genuinely in front of you at the time.`
-        : `You took the best offer available to you in every round — this run was decision-optimal given what you were actually shown.`
+      <p class="run-analysis-note">Board Ceiling counts the single best card on every board, including ones you never held — a measure of upside, luck included. Decision Efficiency only counts offers you actually saw, since which case you first grabbed was always luck, never skill. ${gapFP > 0.05
+        ? `You left ${fmt(gapFP)} on the table this run against the offers you actually saw.`
+        : `You took the best offer available to you in every round — decision-optimal given what you were actually shown.`
       }</p>
     </div>
   `;
@@ -2840,7 +2874,14 @@ function renderSeasonSummary(incomplete){
   overlay.classList.remove('hidden');
   celebrateIfBig(totalFP, getSeasonBigWinThreshold(state.currentSport));
 
-  document.getElementById('shareSeasonBtnOverlay').onclick = (e) => shareOrCopy(shareText, null, e.target);
+  document.getElementById('shareSeasonBtnOverlay').onclick = (e) => {
+    const imagePayload = {
+      mode: 'season',
+      totalFP: fmt(totalFP),
+      players: season.roster.map(r => ({ player: r.player, round: r.round, pos: r.pos || null, fp: fmt(r.fp) })),
+    };
+    shareOrCopy(shareText, imagePayload, e.target);
+  };
   document.getElementById('viewLineupBtnOverlay').onclick = () => {
     overlay.classList.add('hidden');
     lineupViewMode = 'best';
@@ -3638,14 +3679,18 @@ function saveSeasonToLineup(seasonRoster, sport){
     // existed, so old saved lineups render as "100% efficient" rather than
     // crashing or showing a misleading gap the game never actually tracked.
     const totalMaxPossibleFP = seasonRoster.reduce((s,r) => s + (r.maxPossibleFP ?? r.fp), 0);
+    // Board Ceiling: same fallback pattern — old entries without this
+    // field just show no ceiling comparison rather than a fabricated one.
+    const totalBoardCeilingFP = seasonRoster.reduce((s,r) => s + (r.boardCeilingFP ?? r.fp), 0);
     const sportPool = getPoolForSport(sport);
     const entry = {
       players: seasonRoster.map(r => {
         const p = sportPool.find(x => x.player === r.player);
-        return { player: r.player, fp: r.fp, round: r.round, pos: r.pos || null, tier: p ? p.tier : 'VALUE', accolade: getAccolade(r.player), maxPossibleFP: r.maxPossibleFP ?? r.fp };
+        return { player: r.player, fp: r.fp, round: r.round, pos: r.pos || null, tier: p ? p.tier : 'VALUE', accolade: getAccolade(r.player), maxPossibleFP: r.maxPossibleFP ?? r.fp, boardCeilingFP: r.boardCeilingFP ?? r.fp };
       }),
       totalFP: Math.round(totalFP * 10) / 10,
       totalMaxPossibleFP: Math.round(totalMaxPossibleFP * 10) / 10,
+      totalBoardCeilingFP: Math.round(totalBoardCeilingFP * 10) / 10,
       date: new Date().toISOString(),
     };
     let seasons = getSavedSeasons(sport);
@@ -3883,6 +3928,19 @@ function drawSpacedText(ctx, text, cx, y, spacing){
   ctx.textAlign = prevAlign;
 }
 
+function fitCanvasText(ctx, text, maxWidth){
+  // Canvas never auto-wraps or ellipsizes — without this, a long player
+  // name in the season-lineup image (see generateResultImage's 'season'
+  // mode) could run straight into the FP value on the right instead of
+  // stopping cleanly.
+  if(ctx.measureText(text).width <= maxWidth) return text;
+  let t = text;
+  while(t.length > 1 && ctx.measureText(t + '…').width > maxWidth){
+    t = t.slice(0, -1);
+  }
+  return t + '…';
+}
+
 function drawResultCard(ctx, {x, y, w, h, tag, tagColor, value, valueColor, player}){
   ctx.save();
   ctx.shadowColor = 'rgba(111,224,207,0.25)';
@@ -3977,6 +4035,62 @@ async function generateResultImage(payload){
         player: payload.revealedPlayer
       });
     }
+  } else if(payload.mode === 'season'){
+    // Full-lineup result image — previously missing entirely (the
+    // season-summary Share button passed null for imagePayload, so a
+    // completed lineup shared with zero image, unlike every per-round
+    // share which already worked correctly). Same visual language as the
+    // single-case cards above, restyled as a compact vertical list since
+    // a full lineup has 5-6 rows to show, not one.
+    ctx.fillStyle = '#e8f1f8';
+    ctx.font = 'italic 600 64px Fraunces, serif';
+    ctx.fillText('Vault Complete', W/2, 470);
+
+    ctx.fillStyle = '#6fe0cf';
+    ctx.font = '700 130px Oswald, sans-serif';
+    ctx.fillText(payload.totalFP, W/2, 640);
+    ctx.fillStyle = '#8fa3b8';
+    ctx.font = '600 24px Oswald, sans-serif';
+    drawSpacedText(ctx, 'TOTAL LINEUP FP', W/2, 682, 4);
+
+    const n = payload.players.length;
+    const rowGap = 18;
+    const rowH = n >= 6 ? 148 : 172;
+    const rowX = 80, rowW = W - 160;
+    let rowY = 760;
+    payload.players.forEach(p => {
+      ctx.save();
+      const grad = ctx.createLinearGradient(rowX, rowY, rowX, rowY+rowH);
+      grad.addColorStop(0, '#182338');
+      grad.addColorStop(1, '#0a0e14');
+      ctx.fillStyle = grad;
+      roundRect(ctx, rowX, rowY, rowW, rowH, 16);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(63,184,168,0.3)';
+      ctx.lineWidth = 2;
+      roundRect(ctx, rowX, rowY, rowW, rowH, 16);
+      ctx.stroke();
+      ctx.restore();
+
+      const midY = rowY + rowH/2 + 12;
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#3fb8a8';
+      ctx.font = '600 26px Oswald, sans-serif';
+      ctx.fillText(p.pos ? `${p.pos} · R${p.round}` : `R${p.round}`, rowX+36, midY);
+
+      ctx.fillStyle = '#e8f1f8';
+      ctx.font = 'italic 600 36px Fraunces, serif';
+      const nameMaxWidth = rowW - 460;
+      ctx.fillText(fitCanvasText(ctx, p.player, nameMaxWidth), rowX+230, midY);
+
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#6fe0cf';
+      ctx.font = '700 36px Oswald, sans-serif';
+      ctx.fillText(p.fp, rowX+rowW-36, midY);
+      ctx.textAlign = 'center';
+
+      rowY += rowH + rowGap;
+    });
   } else {
     drawResultCard(ctx, {
       x: 130, y: 600, w: W-260, h: 400,
@@ -4827,6 +4941,8 @@ function renderLineupCard(entry, i, mode){
   // than a misleading gap the game never actually recorded.
   const maxPossible = entry.totalMaxPossibleFP ?? entry.totalFP;
   const efficiencyPct = maxPossible > 0 ? Math.round((entry.totalFP / maxPossible) * 100) : 100;
+  const boardCeiling = entry.totalBoardCeilingFP ?? entry.totalFP;
+  const capturedPct = boardCeiling > 0 ? Math.round((entry.totalFP / boardCeiling) * 100) : 100;
   const playerRows = entry.players.map(p => {
     const roundMax = p.maxPossibleFP ?? p.fp;
     const roundGap = Math.round((roundMax - p.fp) * 10) / 10;
@@ -4851,7 +4967,7 @@ function renderLineupCard(entry, i, mode){
         <p class="lineup-total-value">${fmt(entry.totalFP)}</p>
         <p class="lineup-date">${dateLabel}</p>
       </div>
-      <p class="card-efficiency-line">Decision efficiency: <strong>${efficiencyPct}%</strong>${efficiencyPct < 100 ? ` <span class="card-efficiency-detail">(max possible: ${fmt(maxPossible)})</span>` : ' — optimal'}</p>
+      <p class="card-efficiency-line">Board ceiling captured: <strong>${capturedPct}%</strong>${capturedPct < 100 ? ` <span class="card-efficiency-detail">(ceiling: ${fmt(boardCeiling)})</span>` : ''} · Decision efficiency: <strong>${efficiencyPct}%</strong>${efficiencyPct < 100 ? ` <span class="card-efficiency-detail">(max possible: ${fmt(maxPossible)})</span>` : ' — optimal'}</p>
       <div class="lineup-mini-list">${playerRows}</div>
       <div class="panel-actions" style="margin-top:12px;">
         <button class="share-lineup-btn" data-entry-idx="${i}">Share</button>
@@ -4943,7 +5059,12 @@ function renderLineupPanel(){
         resultLine: `I built a ${fmt(s.totalFP)} lineup in Fantasy Vault!`,
         passedLine: s.players.map(p => p.player).join(' · ')
       });
-      shareOrCopy(shareText, null, e.target);
+      const imagePayload = {
+        mode: 'season',
+        totalFP: fmt(s.totalFP),
+        players: s.players.map(p => ({ player: p.player, round: p.round, pos: p.pos || null, fp: fmt(p.fp) })),
+      };
+      shareOrCopy(shareText, imagePayload, e.target);
     };
   });
   wireLineupTabButtons();
@@ -5056,10 +5177,44 @@ function triggerRing(remainingUnopened){
   }, 2200);
 }
 
+const RISK_DISCOUNT = 0.35; // tuned empirically — see chat. How hard the banker
+// hedges while the board's real "big" cards are still unaccounted for.
+
 function computeOffer(remainingUnopened){
   const avg = remainingUnopened.reduce((s,c)=>s+c.value,0) / remainingUnopened.length;
   const mult = ROUND_MULTIPLIER[Math.min(state.roundIndex, ROUND_MULTIPLIER.length-1)];
-  const raw = Math.round(avg * mult); // nearest whole FP
+
+  // Rarity-aware risk adjustment. The old formula only ever looked at the
+  // AVERAGE of remaining cards — but sampleBoard() deliberately guarantees
+  // every 26-card board a handful of real STAR/ELITE outliers (so reveals
+  // feel exciting), which means a held case has a far higher chance of
+  // being one of those than the raw player pool's rarity would suggest
+  // (measured: ~18% STAR / ~5% ELITE per held case on an actual generated
+  // board, vs ~6.5% / ~0.9% in the full 567-player pool). A flat average
+  // can't see that risk at all, because the held case is deliberately
+  // excluded from its own calculation — so no multiplier curve, however
+  // aggressive, can make the offer catch up (verified empirically: even
+  // an extreme 1.55x multiplier only won ~50% of the time).
+  // This instead tracks what a real banker actually has visibility into:
+  // how many of THIS board's real big cards (STAR-or-better) are still
+  // unaccounted for — meaning still unopened, or possibly the held case
+  // itself, which is exactly the genuine uncertainty a banker can't see
+  // through any more than the player can. As big cards get opened and
+  // provably eliminated, that uncertainty shrinks and the offer can
+  // afford to get more confident — the same shape real Deal-or-No-Deal
+  // offers follow, and unlike the old formula, the exact trajectory now
+  // depends on the actual (random) order big cards get revealed each
+  // round, not a fixed schedule.
+  const sport = state.currentSport;
+  const bigCards = state.cases.filter(c => {
+    const tier = getRarityTier(c.value, sport).name;
+    return tier === 'STAR' || tier === 'ELITE';
+  });
+  const bigCardsUnaccounted = bigCards.filter(c => !c.opened).length;
+  const riskFactor = bigCards.length > 0 ? bigCardsUnaccounted / bigCards.length : 0;
+  const riskAdjustedMult = mult * (1 - riskFactor * RISK_DISCOUNT);
+
+  const raw = Math.round(avg * riskAdjustedMult); // nearest whole FP
   // FIX: with no floor, a tightly-clustered remaining set (little real
   // uncertainty left) combined with a sub-1.0 multiplier could produce an
   // offer BELOW every possible remaining case — making No Deal a completely
