@@ -4566,7 +4566,15 @@ function renderSetupPanel(){
     `<option value="${name}" ${name===state.selectedPreset ? 'selected':''}>${name}</option>`
   ).join('');
 
-  const presetBlockHtml = state.presetIndex === null ? `
+  // Admin-only: Saved Boards is currently 100% non-functional for EVERYONE
+  // (see loadPresetIndex/savePresetAs/loadPresetByName/deletePresetByName —
+  // all explicitly stubbed pending a real Fantasy Vault backend), so
+  // showing it to regular players was pure clutter — a "Load" button and
+  // a "shared board database" mention that do nothing. Still visible to
+  // admin as a placeholder/reminder that this needs to be built, since an
+  // admin clicking around here is a deliberate choice, not an accidental
+  // dead end a regular player stumbles into.
+  const presetBlockHtml = !isAdmin ? '' : state.presetIndex === null ? `
     <div class="preset-block"><p class="preset-hint">Loading saved boards…</p></div>
   ` : `
     <div class="preset-block">
