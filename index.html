@@ -521,6 +521,12 @@
     text-transform:uppercase;
     color:var(--cream-dim);
   }
+  .hero-freeze-note{
+    text-align:center;
+    font-size:12px;
+    color:var(--cream-dim);
+    margin:6px 0 0;
+  }
 
   .secondary-options{margin-top:20px;}
   .secondary-options summary{
@@ -618,6 +624,18 @@
     color:var(--brass-bright);
     margin:6px 0 16px;
     line-height:1.4;
+  }
+  .streak-freeze-note{
+    text-align:center;
+    font-size:13px;
+    color:var(--brass-bright);
+    background:rgba(111,224,207,0.08);
+    border:1px solid rgba(111,224,207,0.3);
+    border-radius:8px;
+    padding:10px 16px;
+    margin:0 auto 18px;
+    max-width:460px;
+    line-height:1.5;
   }
   .banker-toast{
     position:fixed;
@@ -2357,9 +2375,9 @@ const RAW_PLAYERS_NHL = [
   {name:"Noah Hanifin", team:"VEG", isGoalie:false, pos:"D", goals:0.04, assists:0.35, shots:1.9, blocks:1.63, shPoints:0.0},
   {name:"Shea Theodore", team:"VEG", isGoalie:false, pos:"D", goals:0.14, assists:0.41, shots:1.86, blocks:1.24, shPoints:0.0},
   {name:"Jeremy Lauzon", team:"VEG", isGoalie:false, pos:"D", goals:0.01, assists:0.18, shots:1.07, blocks:1.43, shPoints:0.0},
-  {name:"Jonathan Toews", team:"WPG", isGoalie:false, pos:"C", goals:0.13, assists:0.22, shots:1.28, blocks:0.41, shPoints:0.0},
   {name:"Alex Iafallo", team:"WPG", isGoalie:false, pos:"C", goals:0.16, assists:0.2, shots:1.44, blocks:0.71, shPoints:0.013},
   {name:"Cole Perfetti", team:"WPG", isGoalie:false, pos:"C", goals:0.18, assists:0.29, shots:2.0, blocks:0.49, shPoints:0.0},
+  {name:"Adam Lowry", team:"WPG", isGoalie:false, pos:"C", goals:0.071, assists:0.229, shots:1.014, blocks:0.88, shPoints:0.0},
   {name:"Dylan DeMelo", team:"WPG", isGoalie:false, pos:"D", goals:0.04, assists:0.2, shots:0.91, blocks:1.33, shPoints:0.024},
   {name:"Dylan Samberg", team:"WPG", isGoalie:false, pos:"D", goals:0.02, assists:0.2, shots:1.32, blocks:1.74, shPoints:0.0},
   {name:"Logan Stanley", team:"WPG", isGoalie:false, pos:"D", goals:0.15, assists:0.2, shots:1.25, blocks:1.17, shPoints:0.0},
@@ -2699,7 +2717,7 @@ function advanceSeasonRound(playerName, playerFP, playerPos){
     // Lineup, so a saved lineup actually reflects real daily results.
     if(state.isDailyMode){
       saveSeasonToLineup(season.roster, state.currentSport);
-      markDailyCompleted();
+      state.lastStreakResult = markDailyCompleted();
       clearDailyProgress(); // finished — the mid-game snapshot is no longer
       // needed now that the real result is durably saved above.
     }
@@ -2853,10 +2871,20 @@ function renderSeasonSummary(incomplete){
 
   const overlay = document.getElementById('finaleOverlay');
   const inner = document.getElementById('finaleOverlayInner');
+  // Surface a freeze use explicitly rather than silently protecting the
+  // streak — the whole point is reassurance, which only works if the
+  // player actually sees it happened. state.lastStreakResult is set right
+  // before this function runs (see the isDailyMode branch above); reset
+  // after reading so it can't leak into some later, unrelated render.
+  const streakFreezeHtml = state.lastStreakResult && state.lastStreakResult.freezeUsed ? `
+    <p class="streak-freeze-note">❄️ Streak freeze used — you missed a day, but your streak survived. ${state.lastStreakResult.freezeCount} freeze${state.lastStreakResult.freezeCount === 1 ? '' : 's'} left.</p>
+  ` : '';
+  state.lastStreakResult = null;
   inner.innerHTML = `
     <p class="finale-eyebrow">Fantasy Vault</p>
     <p class="finale-title">Your Vault Is Complete</p>
     <p class="banker-quote" style="text-align:center;">"${bankerLine}"</p>
+    ${streakFreezeHtml}
     <div class="season-total-hero">
       <p class="season-total-value">${fmt(totalFP)}</p>
       <p class="season-total-label">Total Lineup FP</p>
@@ -3416,15 +3444,46 @@ function hashDateToIndex(dateStr, modulus){
 // declared earlier (see SEEDED RANDOMNESS above) rather than threading a
 // seed parameter through every board-generation function individually.
 
+function getDaysBetween(dateStrEarlier, dateStrLater){
+  // Both YYYY-MM-DD (UTC), matching getTodayDateString/getYesterdayDateString.
+  // Parsed as explicit UTC midnight so this stays correct regardless of the
+  // player's local timezone or DST — plain `new Date(dateStr)` already
+  // parses a bare YYYY-MM-DD as UTC per spec, but being explicit here
+  // means that doesn't have to be remembered correctly if this is ever
+  // copied elsewhere.
+  const a = new Date(dateStrEarlier + 'T00:00:00Z');
+  const b = new Date(dateStrLater + 'T00:00:00Z');
+  return Math.round((b - a) / 86400000);
+}
+
+// STREAK FORGIVENESS — previously a single missed day, for any reason,
+// fully reset the streak to 1 with no recovery. That's the exact failure
+// mode that kills daily-engagement habits: once broken, there's nothing
+// left to protect, so a lot of players just stop coming back. This adds a
+// bounded "streak freeze" — missing exactly ONE day is covered
+// automatically if a freeze is available; missing two or more in a row
+// still breaks the streak same as before. Deliberately NOT unlimited
+// forgiveness, which would make the streak number meaningless — freezes
+// are earned back at streak milestones, capped at a small stockpile.
+const MAX_STREAK_FREEZES = 2;
+const STARTING_STREAK_FREEZES = 1; // new players start with one, so this
+// is something they discover as a pleasant surprise, not a feature that
+// only reveals itself after they've already lost a streak once.
+const STREAK_FREEZE_MILESTONE = 7; // earn one back every 7-day streak
+// milestone (capped at MAX) — ties the safety net's refill to the same
+// habit loop it protects, instead of a disconnected currency.
+
 function getDailyState(){
   try{
+    const freezeRaw = localStorage.getItem('vault_daily_freeze_count');
     return {
       startedDate: localStorage.getItem('vault_daily_started_date'),
       streak: parseInt(localStorage.getItem('vault_daily_streak') || '0', 10),
       lastCompletedDate: localStorage.getItem('vault_daily_last_completed_date'),
+      freezeCount: freezeRaw === null ? STARTING_STREAK_FREEZES : parseInt(freezeRaw, 10),
     };
   } catch(e){
-    return { startedDate: null, streak: 0, lastCompletedDate: null };
+    return { startedDate: null, streak: 0, lastCompletedDate: null, freezeCount: STARTING_STREAK_FREEZES };
   }
 }
 
@@ -3433,14 +3492,49 @@ function markDailyStarted(){
 }
 
 function markDailyCompleted(){
+  // Returns { streak, freezeUsed, freezeCount } so the caller (see
+  // advanceSeasonRound) can surface a clear "streak freeze used" message —
+  // silently protecting someone's streak without telling them would read
+  // as confusing, not reassuring, the moment they notice the number
+  // didn't reset the way they braced for.
   try{
     const today = getTodayDateString();
     const ds = getDailyState();
-    if(ds.lastCompletedDate === today) return; // already counted today, don't double-increment
-    const streak = ds.lastCompletedDate === getYesterdayDateString() ? ds.streak + 1 : 1;
+    if(ds.lastCompletedDate === today){
+      return { streak: ds.streak, freezeUsed: false, freezeCount: ds.freezeCount };
+    }
+
+    let streak, freezeUsed = false, freezeCount = ds.freezeCount;
+
+    if(!ds.lastCompletedDate){
+      streak = 1; // first completion ever
+    } else {
+      const gap = getDaysBetween(ds.lastCompletedDate, today);
+      if(gap === 1){
+        streak = ds.streak + 1; // normal, uninterrupted continuation
+      } else if(gap === 2 && ds.freezeCount > 0){
+        // Exactly one day missed, and a freeze is available — the whole
+        // point of this system. Two or more missed days still breaks it;
+        // a freeze covers a single off day, not an extended absence.
+        streak = ds.streak + 1;
+        freezeUsed = true;
+        freezeCount = ds.freezeCount - 1;
+      } else {
+        streak = 1; // genuine break
+      }
+    }
+
+    if(streak > 0 && streak % STREAK_FREEZE_MILESTONE === 0 && freezeCount < MAX_STREAK_FREEZES){
+      freezeCount += 1;
+    }
+
     localStorage.setItem('vault_daily_streak', String(streak));
     localStorage.setItem('vault_daily_last_completed_date', today);
-  } catch(e){}
+    localStorage.setItem('vault_daily_freeze_count', String(freezeCount));
+    return { streak, freezeUsed, freezeCount };
+  } catch(e){
+    return { streak: 0, freezeUsed: false, freezeCount: 0 };
+  }
 }
 
 /* ---------------------------------------------------------------
@@ -4651,7 +4745,8 @@ function renderSetupPanel(){
       <div class="hero-streak">
         <span class="hero-streak-value">${dailyState.streak}</span>
         <span class="hero-streak-label">day streak</span>
-      </div>` : ''}
+      </div>
+      ${dailyState.freezeCount > 0 ? `<p class="hero-freeze-note">❄️ ${dailyState.freezeCount} streak freeze${dailyState.freezeCount === 1 ? '' : 's'} banked — covers one missed day</p>` : ''}` : ''}
     </div>
 
     <details class="secondary-options" id="secondaryOptionsDetails" ${setupDetailsOpen ? 'open' : ''}>
