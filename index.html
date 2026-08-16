@@ -3075,6 +3075,35 @@ const PLAYER_ACCOLADES = {  "Jalen Johnson": "All-Star",
   "Alexis Mac Allister": "World Cup Champion",
   "Bukayo Saka": "Premier League forward",
   "Phil Foden": "Champions League · 6x Premier League",
+
+  // NHL — real 2025-26 season awards (verified) plus well-established
+  // career honors for major stars already in the pool. Curated, not
+  // exhaustive — matches the NBA list's approach of tagging genuinely
+  // notable players rather than trying to cover the full roster, since a
+  // tag on everyone would just make the flourish stop meaning anything.
+  "Nikita Kucherov": "2026 Hart Trophy · 3x Art Ross · 2x Stanley Cup Champion",
+  "Connor McDavid": "3x Hart Trophy · 2026 Art Ross · Conn Smythe",
+  "Nathan MacKinnon": "2026 Rocket Richard · Stanley Cup Champion",
+  "Zach Werenski": "2026 Norris Trophy",
+  "Andrei Vasilevskiy": "2x Vezina Trophy · Conn Smythe · 2x Stanley Cup Champion",
+  "Matthew Schaefer": "2026 Calder Trophy",
+  "Nick Suzuki": "2026 Selke Trophy",
+  "Cole Caufield": "2026 Lady Byng",
+  "Sam Bennett": "Conn Smythe · 2x Stanley Cup Champion",
+  "Cale Makar": "2x Norris Trophy · Conn Smythe · Stanley Cup Champion",
+  "Alex Ovechkin": "All-Time Goals Leader · 3x Hart Trophy · 9x Rocket Richard",
+  "Sidney Crosby": "3x Stanley Cup Champion · 2x Conn Smythe · 2x Hart Trophy",
+  "Jack Eichel": "Stanley Cup Champion",
+  "Kirill Kaprizov": "2021 Calder Trophy",
+  "Auston Matthews": "Hart Trophy · 3x Rocket Richard",
+  "Igor Shesterkin": "2022 Vezina Trophy",
+  "Connor Hellebuyck": "2025 Hart Trophy · 2x Vezina Trophy",
+  "Sergei Bobrovsky": "2x Vezina Trophy · 2x Stanley Cup Champion",
+  "Sebastian Aho": "2026 Stanley Cup Champion",
+  "Seth Jarvis": "2026 Stanley Cup Champion",
+  "Andrei Svechnikov": "2026 Stanley Cup Champion",
+  "Logan Stankoven": "2026 Stanley Cup Champion",
+  "Tom Wilson": "2018 Stanley Cup Champion",
 };
 
 /* ---------------------------------------------------------------
@@ -3842,28 +3871,55 @@ function celebrateIfBig(value, threshold){
   if(value < (threshold ?? BIG_WIN_THRESHOLD)) return;
   if(typeof confetti !== 'function') return;
   const colors = ['#3fb8a8', '#6fe0cf', '#e8f1f8'];
+  // FIX: the top-of-function check only ever protected the FIRST call.
+  // The remaining five are wrapped in setTimeout — a separate function
+  // scope, evaluated later — so if `confetti` somehow stopped being
+  // callable between the first call and a deferred one firing (a script
+  // tag re-inserted, a hostile extension redefining the global, or just
+  // being defensive about any future refactor that adds an early return
+  // path), those calls had zero protection of their own. safeConfetti
+  // makes every call re-check for itself rather than relying on a
+  // guard that already went out of scope.
+  const safeConfetti = (opts) => { try{ if(typeof confetti === 'function') confetti(opts); }catch(e){} };
 
   // Opening burst — bigger and longer-lived (higher ticks) than before,
   // so this alone already reads as a real moment rather than a quick pop.
-  confetti({ particleCount: 170, spread: 90, origin: { y: 0.3 }, colors, scalar: 1.15, ticks: 320 });
+  safeConfetti({ particleCount: 170, spread: 90, origin: { y: 0.3 }, colors, scalar: 1.15, ticks: 320 });
 
   // Side cannons shortly after — fire from both edges toward center for
   // an enveloping, surround feel instead of everything coming from one
   // point in the middle of the screen.
   setTimeout(() => {
-    confetti({ particleCount: 70, angle: 60, spread: 65, origin: { x: 0, y: 0.55 }, colors, scalar: 1.05, ticks: 300 });
-    confetti({ particleCount: 70, angle: 120, spread: 65, origin: { x: 1, y: 0.55 }, colors, scalar: 1.05, ticks: 300 });
+    safeConfetti({ particleCount: 70, angle: 60, spread: 65, origin: { x: 0, y: 0.55 }, colors, scalar: 1.05, ticks: 300 });
+    safeConfetti({ particleCount: 70, angle: 120, spread: 65, origin: { x: 1, y: 0.55 }, colors, scalar: 1.05, ticks: 300 });
   }, 220);
 
   // Three tapering follow-up waves stretch the whole sequence to roughly
   // 2.5 seconds, each a little smaller than the last, so it settles
   // naturally instead of cutting off abruptly.
-  setTimeout(() => confetti({ particleCount: 100, spread: 105, origin: { y: 0.4 }, colors, scalar: 1.0, ticks: 300 }), 550);
-  setTimeout(() => confetti({ particleCount: 75, spread: 120, origin: { y: 0.35 }, colors, scalar: 0.9, ticks: 280 }), 1000);
-  setTimeout(() => confetti({ particleCount: 55, spread: 90, origin: { y: 0.5 }, colors, scalar: 0.85, ticks: 260 }), 1550);
+  setTimeout(() => safeConfetti({ particleCount: 100, spread: 105, origin: { y: 0.4 }, colors, scalar: 1.0, ticks: 300 }), 550);
+  setTimeout(() => safeConfetti({ particleCount: 75, spread: 120, origin: { y: 0.35 }, colors, scalar: 0.9, ticks: 280 }), 1000);
+  setTimeout(() => safeConfetti({ particleCount: 55, spread: 90, origin: { y: 0.5 }, colors, scalar: 0.85, ticks: 260 }), 1550);
 }
 
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let sb = null;
+try{
+  if(window.supabase && typeof window.supabase.createClient === 'function'){
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+} catch(e){
+  // FIX: this used to run completely unguarded at the top of the script.
+  // If the Supabase CDN script ever failed to load (network hiccup, ad/
+  // content blocker, CDN outage — all real possibilities on mobile
+  // Safari), window.supabase would be undefined and this line would throw
+  // synchronously, at the TOP of the whole script — halting every line
+  // after it, including the final render() call at the bottom of the
+  // file. That means a third-party CDN blip could have taken down the
+  // entire game, not just admin login, which is the only feature that
+  // actually depends on Supabase. Now it degrades to sb = null instead;
+  // every sb-dependent function below checks for that and no-ops.
+  console.warn('Supabase client failed to initialize — admin login unavailable this session; rest of the app is unaffected.', e);
+}
 
 
 
@@ -3906,6 +3962,9 @@ function playSound(name){
 let currentUser = null;
 
 async function initAuth(){
+  if(!sb) return; // Supabase unavailable this session — admin features
+  // simply stay unreachable; every other part of the app already works
+  // without it.
   const { data } = await sb.auth.getSession();
   currentUser = data.session ? data.session.user : null;
   sb.auth.onAuthStateChange((_event, session) => {
@@ -3916,11 +3975,13 @@ async function initAuth(){
 }
 
 async function adminSignIn(email, password){
+  if(!sb) return 'Admin login is temporarily unavailable — please try again shortly.';
   const { error } = await sb.auth.signInWithPassword({ email, password });
   return error ? error.message : null;
 }
 
 async function adminSignOut(){
+  if(!sb) return;
   await sb.auth.signOut();
 }
 
@@ -5055,10 +5116,16 @@ function renderLineupCard(entry, i, mode){
     const roundMax = p.maxPossibleFP ?? p.fp;
     const roundGap = Math.round((roundMax - p.fp) * 10) / 10;
     const gapTag = roundGap > 0.05 ? `<span class="round-gap-tag">left ${fmt(roundGap)} on the table</span>` : '';
+    // Previously captured on every saved entry (see saveSeasonToLineup)
+    // but never actually read back out anywhere — the data existed, the
+    // card just never displayed it. Matches the same inline style already
+    // used for accolades during live case reveals, so a decorated player
+    // reads the same way here as they do in the moment they got drafted.
+    const accoladeTag = p.accolade ? ` <span class="accolade-inline">(${p.accolade})</span>` : '';
     return `
     <div class="lineup-mini-row">
       <span class="round-tag">R${p.round}</span>
-      <span class="lineup-mini-player" style="color:${getRarityTier(p.fp).color};">${p.player}</span>
+      <span class="lineup-mini-player" style="color:${getRarityTier(p.fp).color};">${p.player}${accoladeTag}</span>
       <span class="lineup-mini-fp">${fmt(p.fp)}${gapTag}</span>
     </div>
   `;
